@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Camera Final Fixed</title>
+    <title>AI Camera Final</title>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; }
+        body { background: #000; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; }
         #controls { padding: 15px; text-align: center; background: #222; width: 100%; border-bottom: 1px solid #444; }
-        button { padding: 15px 30px; font-size: 18px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        #log-area { width: 95%; height: 200px; background: #111; border: 1px solid #555; overflow-y: scroll; margin-top: 10px; padding: 10px; text-align: left; color: #0f0; white-space: pre-wrap; font-size: 13px; }
+        #status { font-size: 18px; color: yellow; margin-top: 10px; }
         canvas { width: 100%; max-width: 640px; border: 2px solid #00ff00; margin-top: 10px; }
         video { display: none; }
     </style>
@@ -16,37 +15,27 @@
 <body>
 
     <div id="controls">
-        <button id="btn-start" onclick="startCamera()">BẬT CAMERA</button>
-        <div id="status">Đang đợi cấu hình Module...</div>
+        <div id="status">Đang nạp AI... Vui lòng đợi.</div>
     </div>
-    
-    <div id="log-area">Nhật ký hệ thống...</div>
 
     <canvas id="output"></canvas>
     <video id="webcam" playsinline autoplay muted></video>
 
     <script>
-        const logArea = document.getElementById('log-area');
-        const statusEl = document.getElementById('status');
+        var statusEl = document.getElementById('status');
         
-        function log(msg, error=false) {
-            const color = error ? '#ff5555' : '#00ff00';
-            logArea.innerHTML = `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>` + logArea.innerHTML;
-        }
-
-        // --- ĐÂY LÀ PHẦN QUAN TRỌNG NHẤT ---
-        // Ta tạo biến Module trước để file JS của bạn "chui" vào đây
+        // Tạo biến Module trước để file JS sử dụng
         var Module = {
+            // Hàm này sẽ TỰ ĐỘNG chạy khi AI tải xong
             onRuntimeInitialized: function() {
-                log("✅ WASM ĐÃ SẴN SÀNG! (onRuntimeInitialized)");
-                statusEl.innerText = "AI đã tải xong. Hãy bấm nút.";
-                window.isModelReady = true;
+                statusEl.innerText = "✅ AI ĐÃ SẴN SÀNG!";
+                statusEl.style.color = "#00ff00";
+                console.log("Wasm loaded success!");
+                startCamera(); // Tự động bật camera
             },
+            // Chỉ đường dẫn chính xác cho file WASM
             locateFile: function(path) {
-                // Chỉ đường dẫn chính xác cho file wasm
-                var wasmName = "edge-impulse-standalone.wasm";
-                log(`Hệ thống tìm: ${path} -> Ép dùng: ${wasmName}`);
-                return wasmName;
+                return "edge-impulse-standalone.wasm";
             }
         };
     </script>
@@ -58,33 +47,18 @@
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d');
-        const btn = document.getElementById('btn-start');
         var classifier = null;
 
         async function startCamera() {
-            if (!window.isModelReady) {
-                alert("Đang tải AI, vui lòng đợi thêm vài giây...");
-                return;
-            }
-
-            btn.style.display = 'none';
-            statusEl.innerText = "Đang khởi động...";
-            log("Bắt đầu mở Camera...");
-
             try {
-                // Khởi tạo Classifier
-                // Vì Module đã được tạo global, ta không cần gọi createModule() nữa
+                statusEl.innerText = "Đang khởi tạo Classifier...";
+                
+                // Khởi tạo bộ phân loại
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
+
+                statusEl.innerText = "Đang mở Camera...";
                 
-                log("✅ Classifier đã khởi tạo!");
-
-                // Lấy thông tin dự án
-                try {
-                    let project = classifier.getProjectInfo();
-                    log(`Dự án: ${project.owner} / ${project.name}`);
-                } catch(e) {}
-
                 // Mở Camera
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
@@ -92,17 +66,16 @@
                 });
                 
                 video.srcObject = stream;
+                
                 video.onloadedmetadata = () => {
                     video.play();
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    log("🎥 Camera OK. Đang nhận diện...");
+                    statusEl.innerText = "Đang nhận diện...";
                     requestAnimationFrame(loop);
                 };
-
             } catch (err) {
-                log("❌ LỖI: " + err.message, true);
-                btn.style.display = 'block';
+                alert("Lỗi: " + err.message);
             }
         }
 
@@ -119,7 +92,7 @@
                                 ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
                                 ctx.fillStyle = '#00FF00'; ctx.font = '20px Arial';
                                 ctx.fillText(`${obj.label} ${(obj.value*100).toFixed(0)}%`, obj.x, obj.y - 5);
-                            } 
+                            }
                             // Phân loại
                             else if (obj.value > 0.5) {
                                 statusEl.innerText = `${obj.label}: ${(obj.value*100).toFixed(0)}%`;
