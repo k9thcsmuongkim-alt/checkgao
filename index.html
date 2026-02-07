@@ -3,45 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Camera Final</title>
+    <title>AI Camera Ultimate Debug</title>
     <style>
-        body { background: #000; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; }
-        #controls { padding: 15px; text-align: center; background: #222; width: 100%; border-bottom: 1px solid #444; }
-        #status { font-size: 18px; color: yellow; margin-top: 10px; }
-        canvas { width: 100%; max-width: 640px; border: 2px solid #00ff00; margin-top: 10px; }
+        body { background-color: #000; color: #0f0; font-family: 'Consolas', monospace; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 10px; }
+        h2 { color: #fff; margin: 5px 0; font-size: 1.2rem; }
+        
+        /* Khu vực điều khiển */
+        #controls { width: 100%; max-width: 600px; text-align: center; margin-bottom: 10px; }
+        button { padding: 12px 20px; font-size: 16px; font-weight: bold; cursor: pointer; border: none; border-radius: 4px; margin: 5px; }
+        .btn-check { background: #ff9800; color: #000; }
+        .btn-start { background: #2196F3; color: #fff; display: none; } /* Ẩn nút start lúc đầu */
+        
+        /* Màn hình hiển thị */
+        #canvas-container { position: relative; width: 100%; max-width: 480px; border: 2px solid #333; background: #111; min-height: 300px; display: flex; justify-content: center; align-items: center; }
+        canvas { width: 100%; height: auto; display: block; }
         video { display: none; }
+        
+        /* Nhật ký lỗi (Quan trọng nhất) */
+        #console-log { 
+            width: 100%; max-width: 600px; height: 200px; 
+            background: #0d0d0d; border: 1px solid #444; 
+            overflow-y: scroll; font-size: 12px; 
+            padding: 10px; margin-top: 10px; text-align: left; 
+            white-space: pre-wrap; word-wrap: break-word;
+        }
+        
+        /* Màu sắc trạng thái */
+        .log-info { color: #0f0; }
+        .log-warn { color: #ffeb3b; }
+        .log-error { color: #ff5555; font-weight: bold; border-left: 3px solid #ff5555; padding-left: 5px; }
+        .status-text { font-size: 18px; font-weight: bold; margin: 10px 0; color: #fff; }
     </style>
 </head>
 <body>
 
+    <h2>AI CAMERA DEBUGGER</h2>
+    
     <div id="controls">
-        <div id="status">Đang nạp AI... Vui lòng đợi.</div>
+        <div id="status" class="status-text">B1: Bấm nút Kiểm tra file</div>
+        <button class="btn-check" onclick="runDiagnostics()">1. KIỂM TRA FILE & HỆ THỐNG</button>
+        <button class="btn-start" onclick="startCamera()">2. BẬT CAMERA</button>
     </div>
 
-    <canvas id="output"></canvas>
+    <div id="canvas-container">
+        <canvas id="output"></canvas>
+        <span id="placeholder-text" style="color: #555;">Camera sẽ hiện ở đây...</span>
+    </div>
+    
     <video id="webcam" playsinline autoplay muted></video>
 
+    <div id="console-log">Nhật ký hệ thống sẽ hiện ở đây...</div>
+
     <script>
-        var statusEl = document.getElementById('status');
-        
-        // Tạo biến Module trước để file JS sử dụng
+        // Tên file chính xác (Cần sửa nếu file bạn tên khác)
+        const CONFIG = {
+            js: "edge-impulse-standalone.js",
+            wasm: "edge-impulse-standalone.wasm", // QUAN TRỌNG: Phải đúng từng ký tự
+            helper: "run-impulse.js"
+        };
+
+        const logArea = document.getElementById('console-log');
+        const statusEl = document.getElementById('status');
+        const btnCheck = document.querySelector('.btn-check');
+        const btnStart = document.querySelector('.btn-start');
+
+        // Hàm ghi nhật ký ra màn hình
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            logArea.innerHTML += `<div class="log-${type}">[${time}] ${msg}</div>`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        // Định nghĩa Module để hứng file JS
         var Module = {
-            // Hàm này sẽ TỰ ĐỘNG chạy khi AI tải xong
             onRuntimeInitialized: function() {
-                statusEl.innerText = "✅ AI ĐÃ SẴN SÀNG!";
+                log("✅ WASM Runtime đã khởi chạy thành công!", 'info');
+                window.isWasmReady = true;
+                statusEl.innerText = "Sẵn sàng! Hãy bấm nút Bật Camera";
                 statusEl.style.color = "#00ff00";
-                console.log("Wasm loaded success!");
-                startCamera(); // Tự động bật camera
+                btnStart.style.display = 'inline-block';
+                btnCheck.style.display = 'none';
             },
-            // Chỉ đường dẫn chính xác cho file WASM
-            locateFile: function(path) {
-                return "edge-impulse-standalone.wasm";
+            locateFile: function(path, scriptDirectory) {
+                log(`⚠️ Hệ thống đang tìm file: '${path}'`, 'warn');
+                log(`👉 Đang ép đường dẫn về: '${CONFIG.wasm}'`, 'info');
+                return CONFIG.wasm; // Luôn trả về đúng tên file wasm của mình
             }
         };
     </script>
 
-    <script src="edge-impulse-standalone.js"></script>
-    <script src="run-impulse.js"></script>
+    <script>
+        async function runDiagnostics() {
+            log("--- BẮT ĐẦU KIỂM TRA HỆ THỐNG ---", 'info');
+            btnCheck.disabled = true;
+            let errors = 0;
+
+            // 1. Kiểm tra File JS
+            try {
+                log(`Đang kiểm tra file JS: ${CONFIG.js}...`);
+                const res = await fetch(CONFIG.js);
+                if (res.ok) log(`✅ Đã tìm thấy JS (${res.status} OK)`, 'info');
+                else throw new Error(`Không tìm thấy file JS (Lỗi ${res.status})`);
+            } catch (e) {
+                log(`❌ LỖI NGHIÊM TRỌNG: ${e.message}`, 'error');
+                log("👉 Bạn chưa upload file .js hoặc sai tên file.", 'error');
+                errors++;
+            }
+
+            // 2. Kiểm tra File WASM (Nguyên nhân chính gây lỗi 404/Treo)
+            try {
+                log(`Đang kiểm tra file WASM: ${CONFIG.wasm}...`);
+                const res = await fetch(CONFIG.wasm);
+                if (res.ok) log(`✅ Đã tìm thấy WASM (${res.status} OK)`, 'info');
+                else throw new Error(`Không tìm thấy file WASM (Lỗi ${res.status})`);
+            } catch (e) {
+                log(`❌ LỖI NGHIÊM TRỌNG: ${e.message}`, 'error');
+                log("👉 Bạn chưa upload file .wasm hoặc tên file trên GitHub khác tên trong code.", 'error');
+                errors++;
+            }
+
+            if (errors > 0) {
+                statusEl.innerText = "❌ THIẾU FILE! XEM NHẬT KÝ BÊN DƯỚI";
+                statusEl.style.color = "red";
+                btnCheck.disabled = false;
+                alert("Bạn bị thiếu file quan trọng. Hãy đọc dòng chữ màu đỏ trong khung nhật ký!");
+                return;
+            }
+
+            // Nếu file đủ, bắt đầu nạp script
+            log("✅ File đầy đủ. Đang nạp thư viện...", 'info');
+            loadScripts();
+        }
+
+        function loadScripts() {
+            // Nạp file JS chính
+            const script = document.createElement('script');
+            script.src = CONFIG.js;
+            script.onload = () => log("Đã nạp file JS chính.", 'info');
+            script.onerror = () => log("❌ Không thể chạy file JS chính. File có thể bị hỏng.", 'error');
+            document.body.appendChild(script);
+
+            // Nạp file phụ trợ
+            const script2 = document.createElement('script');
+            script2.src = CONFIG.helper;
+            script2.onload = () => log("Đã nạp file run-impulse.js", 'info');
+            document.body.appendChild(script2);
+        }
+    </script>
 
     <script>
         const video = document.getElementById('webcam');
@@ -50,56 +158,83 @@
         var classifier = null;
 
         async function startCamera() {
+            if (!window.isWasmReady) {
+                alert("AI chưa tải xong. Vui lòng đợi dòng chữ 'WASM Runtime' hiện lên.");
+                return;
+            }
+
+            btnStart.disabled = true;
+            statusEl.innerText = "Đang khởi động Camera...";
+
             try {
-                statusEl.innerText = "Đang khởi tạo Classifier...";
-                
-                // Khởi tạo bộ phân loại
+                // Khởi tạo Classifier
+                if (typeof EdgeImpulseClassifier === 'undefined') {
+                    throw new Error("Không tìm thấy EdgeImpulseClassifier. File run-impulse.js có vấn đề?");
+                }
+
+                log("Đang khởi tạo bộ não AI...", 'info');
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
+                log("✅ Classifier Init thành công!", 'info');
 
-                statusEl.innerText = "Đang mở Camera...";
-                
+                // Lấy thông tin Project
+                try {
+                    const project = classifier.getProjectInfo();
+                    log(`Dự án: ${project.owner} / ${project.name}`, 'info');
+                } catch(e) { log("Không đọc được thông tin dự án (Không sao).", 'warn'); }
+
                 // Mở Camera
+                log("Đang xin quyền Camera...", 'info');
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
-                    video: { facingMode: "environment", width: 640, height: 480 }
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
                 });
-                
+
                 video.srcObject = stream;
-                
                 video.onloadedmetadata = () => {
                     video.play();
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
+                    document.getElementById('placeholder-text').style.display = 'none';
                     statusEl.innerText = "Đang nhận diện...";
+                    log("🎥 Camera đã bật! Đang chạy vòng lặp...", 'info');
                     requestAnimationFrame(loop);
                 };
+
             } catch (err) {
-                alert("Lỗi: " + err.message);
+                log(`❌ LỖI CAMERA/AI: ${err.message}`, 'error');
+                statusEl.innerText = "Lỗi! Xem nhật ký.";
+                alert("Gặp lỗi: " + err.message);
+                btnStart.disabled = false;
             }
         }
 
         async function loop() {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
             if (classifier) {
                 try {
                     let res = classifier.classifyElements(video);
+                    
                     if (res && res.results && res.results.length > 0) {
                         res.results.forEach(obj => {
-                            // Vẽ khung (FOMO)
+                            // Vẽ khung (Object Detection / FOMO)
                             if (obj.x !== undefined) {
                                 ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 4;
                                 ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
                                 ctx.fillStyle = '#00FF00'; ctx.font = '20px Arial';
                                 ctx.fillText(`${obj.label} ${(obj.value*100).toFixed(0)}%`, obj.x, obj.y - 5);
-                            }
-                            // Phân loại
+                            } 
+                            // Phân loại (Classification)
                             else if (obj.value > 0.5) {
-                                statusEl.innerText = `${obj.label}: ${(obj.value*100).toFixed(0)}%`;
+                                ctx.fillStyle = "yellow"; ctx.font = "30px Arial";
+                                ctx.fillText(`${obj.label}: ${(obj.value*100).toFixed(0)}%`, 20, 50);
                             }
                         });
                     }
-                } catch (e) {}
+                } catch (e) {
+                    // Lỗi trong vòng lặp thường do video chưa sẵn sàng, bỏ qua
+                }
             }
             requestAnimationFrame(loop);
         }
