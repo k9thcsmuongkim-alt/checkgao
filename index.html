@@ -3,90 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Camera Deep Log</title>
+    <title>AI Camera Auto-Size</title>
     <style>
-        body { background: #000; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 10px; }
-        #controls { width: 100%; text-align: center; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        body { background: #000; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 5px; }
         
-        #log-area { 
-            width: 100%; height: 350px; background: #111; border: 1px solid #555; 
-            overflow-y: scroll; font-size: 11px; padding: 5px; text-align: left; 
-            white-space: pre-wrap; color: #ccc; font-family: 'Consolas', monospace;
-        }
-        
-        canvas { width: 100%; max-width: 480px; border: 2px solid #333; margin-top: 10px; }
+        /* Bảng điều khiển */
+        #status-panel { width: 100%; max-width: 640px; background: #222; padding: 10px; margin-bottom: 5px; border-bottom: 2px solid #555; }
+        .info-line { margin: 5px 0; font-size: 14px; }
+        .highlight { color: #00ff00; font-weight: bold; }
+        .warn { color: yellow; }
+        .err { color: #ff5555; }
+
+        /* Màn hình Camera */
+        #container { position: relative; width: 100%; max-width: 640px; }
+        canvas { width: 100%; height: auto; border: 2px solid #333; display: block; }
         video { display: none; }
         
-        .log-std { color: #ddd; }
-        .log-err { color: #ff5555; font-weight: bold; border-left: 3px solid red; padding-left: 5px; }
-        .log-sys { color: #00ff00; font-weight: bold; }
-        .log-warn { color: yellow; }
+        /* Khu vực hiện kết quả thô (Debug) */
+        #raw-result { 
+            width: 95%; height: 100px; 
+            background: #111; border: 1px solid #444; 
+            margin-top: 10px; padding: 5px; 
+            overflow-y: scroll; font-size: 11px; 
+            color: #ddd; white-space: pre-wrap;
+        }
     </style>
 </head>
 <body>
 
-    <div id="controls">
-        <h2 style="margin:5px;">DEEP DEBUG MODE</h2>
-        <div id="status">Đang khởi tạo môi trường...</div>
+    <div id="status-panel">
+        <div class="info-line">TRẠNG THÁI: <span id="status-text">Đang tải...</span></div>
+        <div class="info-line">MODEL INFO: <span id="model-info" class="warn">Chưa đọc được...</span></div>
+        <div class="info-line">CAMERA: <span id="cam-info">Chưa bật</span></div>
     </div>
-
-    <div id="log-area">...</div>
-    <canvas id="output"></canvas>
+    
+    <div id="container">
+        <canvas id="output"></canvas>
+    </div>
+    
+    <div id="raw-result">Kết quả thô sẽ hiện ở đây...</div>
+    
+    <canvas id="hidden-canvas" style="display:none;"></canvas>
     <video id="webcam" playsinline autoplay muted></video>
 
     <script>
-        const logArea = document.getElementById('log-area');
-        const statusEl = document.getElementById('status');
-        
-        function log(msg, type='std') {
-            logArea.innerHTML += `<div class="log-${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
-            logArea.scrollTop = logArea.scrollHeight;
-        }
-
-        // Bắt lỗi toàn cục của trình duyệt
-        window.onerror = function(msg, url, lineNo, columnNo, error) {
-            log(`CRITICAL JS ERROR: ${msg} (Line ${lineNo})`, 'err');
-            return false;
-        };
-
-        // Bắt lỗi Promise (thường là lỗi tải WASM)
-        window.onunhandledrejection = function(event) {
-            log(`UNHANDLED PROMISE: ${event.reason}`, 'err');
-        };
-
-        // --- CẤU HÌNH MODULE EMSCRIPTEN ---
         var Module = {
-            // 1. Nghe lén thông tin bình thường từ C++
-            print: function(text) {
-                log(`[STDOUT] ${text}`, 'std');
-            },
-            // 2. Nghe lén LỖI từ C++ (Đây là cái chúng ta cần tìm!)
-            printErr: function(text) {
-                log(`[STDERR] ${text}`, 'err');
-                if (text.includes("memory")) {
-                    alert("Lỗi bộ nhớ! Điện thoại không đủ RAM.");
-                }
-            },
-            // 3. Theo dõi trạng thái tải file
-            setStatus: function(text) {
-                log(`[STATUS] ${text}`, 'sys');
-                statusEl.innerText = text;
-            },
-            // 4. Theo dõi file còn thiếu
-            monitorRunDependencies: function(left) {
-                log(`[MONITOR] Còn ${left} file cần tải...`, 'warn');
-            },
-            // 5. Khi chạy xong
             onRuntimeInitialized: function() {
-                log("✅ KẾT THÚC: Runtime đã nạp xong!", 'sys');
-                window.isModelReady = true;
+                updateStatus("✅ AI Core đã nạp. Đang đọc thông số...", "highlight");
+                initAI();
             },
-            // 6. Chỉ đường dẫn
-            locateFile: function(path) {
-                log(`[LOCATE] Đang tìm: ${path}`, 'warn');
-                return "edge-impulse-standalone.wasm";
-            }
+            locateFile: function(path) { return "edge-impulse-standalone.wasm"; }
         };
+
+        function updateStatus(msg, type='') {
+            const el = document.getElementById('status-text');
+            el.innerText = msg;
+            el.className = type;
+        }
     </script>
 
     <script src="edge-impulse-standalone.js"></script>
@@ -96,56 +69,135 @@
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d');
+        const hiddenCanvas = document.getElementById('hidden-canvas');
+        const hiddenCtx = hiddenCanvas.getContext('2d');
+        const rawResultEl = document.getElementById('raw-result');
+        const modelInfoEl = document.getElementById('model-info');
+        
         var classifier = null;
+        // Kích thước mặc định (sẽ được cập nhật tự động)
+        var modelWidth = 96;
+        var modelHeight = 96; 
+        var isReady = false;
 
-        // Thay vì chờ onRuntimeInitialized (vì nó đang lỗi), ta dùng vòng lặp kiểm tra
-        let checkInterval = setInterval(() => {
-            if (typeof EdgeImpulseClassifier !== 'undefined') {
-                log("🔍 Đã thấy class EdgeImpulseClassifier. Đang thử khởi tạo...", 'sys');
-                clearInterval(checkInterval);
-                startApp();
-            }
-        }, 1000);
-
-        async function startApp() {
+        async function initAI() {
             try {
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
-                log("✅ Classifier Init thành công! (Bỏ qua lỗi WASM)", 'sys');
                 
-                // Mở Camera
+                // --- TỰ ĐỘNG ĐỌC THÔNG SỐ MODEL ---
+                // Đây là bước quan trọng nhất để sửa lỗi "không nhận diện"
+                let props = Module.get_properties();
+                console.log("Model Props:", props); // Xem log F12 nếu cần
+                
+                // Cập nhật kích thước chuẩn từ Model
+                // (Mã nguồn C++ thường lưu kích thước ảnh trong input_width/height hoặc sensors)
+                if (props.image_input_width && props.image_input_height) {
+                    modelWidth = props.image_input_width;
+                    modelHeight = props.image_input_height;
+                } else {
+                    // Nếu không có, thử tính toán từ input_features_count (ví dụ 9216 = 96x96x1)
+                    // Nhưng an toàn nhất là mặc định 96 hoặc 160.
+                    // Bạn có thể sửa thủ công số này nếu biết chính xác model của mình (vd: 320)
+                }
+
+                modelInfoEl.innerText = `Input: ${modelWidth}x${modelHeight} | Tần số: ${(props.frequency || '?')}Hz`;
+                
+                // Cài đặt canvas ẩn đúng kích thước model yêu cầu
+                hiddenCanvas.width = modelWidth;
+                hiddenCanvas.height = modelHeight;
+
+                startCamera();
+
+            } catch (e) {
+                updateStatus("Lỗi khởi tạo AI: " + e.message, "err");
+            }
+        }
+
+        async function startCamera() {
+            try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
                     video: { facingMode: "environment", width: 640, height: 480 }
                 });
+                
                 video.srcObject = stream;
                 video.onloadedmetadata = () => {
                     video.play();
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
+                    
+                    document.getElementById('cam-info').innerText = `${video.videoWidth}x${video.videoHeight}`;
+                    updateStatus("🎥 Đang chạy nhận diện...", "highlight");
+                    isReady = true;
                     requestAnimationFrame(loop);
                 };
-            } catch (e) {
-                log(`❌ KHỞI ĐỘNG THẤT BẠI: ${e.message}`, 'err');
-                log("👉 Gợi ý: Nếu lỗi là 'Failed to fetch', hãy kiểm tra lại tên file .wasm trên GitHub.", 'err');
+            } catch (err) {
+                updateStatus("Lỗi Camera: " + err.message, "err");
             }
         }
 
         async function loop() {
+            // Vẽ camera lên màn hình
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            if (classifier) {
+
+            if (isReady && classifier) {
                 try {
-                    let res = classifier.classifyElements(video);
-                    if (res && res.results.length > 0) {
-                        // Vẽ kết quả để biết nó chạy
-                         res.results.forEach(obj => {
+                    // 1. Resize ảnh về đúng kích thước Model yêu cầu
+                    hiddenCtx.drawImage(video, 0, 0, modelWidth, modelHeight);
+                    
+                    // 2. Lấy dữ liệu Pixel
+                    let imageData = hiddenCtx.getImageData(0, 0, modelWidth, modelHeight);
+                    let pixels = imageData.data;
+                    
+                    // 3. Chuyển đổi sang định dạng Model (RGB Hex Integer)
+                    let features = [];
+                    for (let i = 0; i < pixels.length; i += 4) {
+                        // Edge Impulse thường dùng format: (R << 16) + (G << 8) + B
+                        let hex = (pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2];
+                        features.push(hex);
+                    }
+
+                    // 4. Gửi đi phân loại
+                    let res = classifier.classify(features);
+
+                    // 5. HIỆN KẾT QUẢ THÔ (DEBUG)
+                    if (res && res.results && res.results.length > 0) {
+                        // In kết quả đầu tiên ra ô debug để bạn xem
+                        let debugText = res.results.map(r => `${r.label}: ${r.value.toFixed(2)}`).join(", ");
+                        rawResultEl.innerText = debugText;
+
+                        // 6. Vẽ lên màn hình
+                        res.results.forEach(obj => {
+                            // Object Detection (FOMO)
                             if (obj.x !== undefined) {
-                                ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 4;
-                                ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+                                // Quy đổi tọa độ
+                                let scaleX = canvas.width / modelWidth;
+                                let scaleY = canvas.height / modelHeight;
+                                
+                                let x = obj.x * scaleX;
+                                let y = obj.y * scaleY;
+                                let w = obj.width * scaleX;
+                                let h = obj.height * scaleY;
+
+                                ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 3;
+                                ctx.strokeRect(x, y, w, h);
+                                ctx.fillStyle = '#00FF00'; ctx.font = '16px Arial';
+                                ctx.fillText(obj.label, x, y - 5);
+                            } 
+                            // Classification (Phân loại ảnh)
+                            else if (obj.value > 0.4) { // Hạ ngưỡng xuống 0.4 để dễ thấy
+                                ctx.fillStyle = "yellow"; ctx.font = "24px Arial";
+                                ctx.fillText(`${obj.label}: ${(obj.value*100).toFixed(0)}%`, 20, 40);
                             }
                         });
+                    } else {
+                        rawResultEl.innerText = "Không có kết quả (Mảng rỗng)";
                     }
-                } catch (e) {}
+
+                } catch (e) {
+                    rawResultEl.innerText = "Lỗi Loop: " + e.message;
+                }
             }
             requestAnimationFrame(loop);
         }
