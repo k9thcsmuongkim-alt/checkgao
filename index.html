@@ -3,118 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Camera Auto-Size</title>
+    <title>AI Camera Fixed Final</title>
     <style>
-        body { background: #000; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 5px; }
+        body { background: #000; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 10px; }
         
-        /* Bảng điều khiển */
-        #status-panel { width: 100%; max-width: 640px; background: #222; padding: 10px; margin-bottom: 5px; border-bottom: 2px solid #555; }
-        .info-line { margin: 5px 0; font-size: 14px; }
-        .highlight { color: #00ff00; font-weight: bold; }
-        .warn { color: yellow; }
+        #status-panel { width: 100%; max-width: 640px; background: #222; padding: 15px; border-bottom: 2px solid #555; text-align: center; }
+        .status-text { font-size: 18px; font-weight: bold; margin-bottom: 10px; display: block; }
+        .highlight { color: #00ff00; }
         .err { color: #ff5555; }
-
-        /* Màn hình Camera */
-        #container { position: relative; width: 100%; max-width: 640px; }
+        
+        #container { position: relative; width: 100%; max-width: 640px; margin-top: 10px; }
         canvas { width: 100%; height: auto; border: 2px solid #333; display: block; }
         video { display: none; }
         
-        /* Khu vực hiện kết quả thô (Debug) */
-        #raw-result { 
-            width: 95%; height: 100px; 
-            background: #111; border: 1px solid #444; 
-            margin-top: 10px; padding: 5px; 
-            overflow-y: scroll; font-size: 11px; 
-            color: #ddd; white-space: pre-wrap;
-        }
+        /* Nút bắt buộc (chỉ hiện khi cần) */
+        #btn-start { display: none; padding: 15px 30px; font-size: 18px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+        
+        /* Debug info */
+        #debug-info { font-size: 12px; color: #aaa; margin-top: 5px; }
     </style>
 </head>
 <body>
 
     <div id="status-panel">
-        <div class="info-line">TRẠNG THÁI: <span id="status-text">Đang tải...</span></div>
-        <div class="info-line">MODEL INFO: <span id="model-info" class="warn">Chưa đọc được...</span></div>
-        <div class="info-line">CAMERA: <span id="cam-info">Chưa bật</span></div>
+        <span id="status-text" class="status-text">Đang khởi tạo hệ thống...</span>
+        <div id="debug-info">Chờ thư viện tải...</div>
+        <button id="btn-start" onclick="initAI()">BẤM ĐỂ BẮT ĐẦU</button>
     </div>
     
     <div id="container">
         <canvas id="output"></canvas>
     </div>
     
-    <div id="raw-result">Kết quả thô sẽ hiện ở đây...</div>
-    
     <canvas id="hidden-canvas" style="display:none;"></canvas>
     <video id="webcam" playsinline autoplay muted></video>
 
     <script>
         var Module = {
-            onRuntimeInitialized: function() {
-                updateStatus("✅ AI Core đã nạp. Đang đọc thông số...", "highlight");
-                initAI();
-            },
-            locateFile: function(path) { return "edge-impulse-standalone.wasm"; }
+            locateFile: function(path) {
+                // Chỉ đường cho file WASM
+                return "edge-impulse-standalone.wasm";
+            }
         };
-
-        function updateStatus(msg, type='') {
-            const el = document.getElementById('status-text');
-            el.innerText = msg;
-            el.className = type;
-        }
     </script>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
 
     <script>
+        const statusEl = document.getElementById('status-text');
+        const debugEl = document.getElementById('debug-info');
+        const btnStart = document.getElementById('btn-start');
+        
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d');
         const hiddenCanvas = document.getElementById('hidden-canvas');
         const hiddenCtx = hiddenCanvas.getContext('2d');
-        const rawResultEl = document.getElementById('raw-result');
-        const modelInfoEl = document.getElementById('model-info');
-        
+
         var classifier = null;
-        // Kích thước mặc định (sẽ được cập nhật tự động)
         var modelWidth = 96;
-        var modelHeight = 96; 
-        var isReady = false;
+        var modelHeight = 96;
+        var isCameraRunning = false;
+
+        // Tự động chạy khi trang tải xong
+        window.onload = function() {
+            // Đợi 1 chút để đảm bảo file JS đã nạp
+            setTimeout(initAI, 1000);
+        };
 
         async function initAI() {
+            btnStart.style.display = 'none';
+            statusEl.innerText = "⏳ Đang nạp Model AI...";
+            
             try {
+                if (typeof EdgeImpulseClassifier === 'undefined') {
+                    throw new Error("Chưa tải được file run-impulse.js");
+                }
+
+                // Khởi tạo Classifier (Đây là bước quan trọng nhất)
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
                 
-                // --- TỰ ĐỘNG ĐỌC THÔNG SỐ MODEL ---
-                // Đây là bước quan trọng nhất để sửa lỗi "không nhận diện"
-                let props = Module.get_properties();
-                console.log("Model Props:", props); // Xem log F12 nếu cần
-                
-                // Cập nhật kích thước chuẩn từ Model
-                // (Mã nguồn C++ thường lưu kích thước ảnh trong input_width/height hoặc sensors)
-                if (props.image_input_width && props.image_input_height) {
-                    modelWidth = props.image_input_width;
-                    modelHeight = props.image_input_height;
-                } else {
-                    // Nếu không có, thử tính toán từ input_features_count (ví dụ 9216 = 96x96x1)
-                    // Nhưng an toàn nhất là mặc định 96 hoặc 160.
-                    // Bạn có thể sửa thủ công số này nếu biết chính xác model của mình (vd: 320)
+                statusEl.innerText = "✅ AI Đã Tải Xong! Đang đọc thông số...";
+                statusEl.className = "status-text highlight";
+
+                // --- TỰ ĐỘNG ĐỌC KÍCH THƯỚC MODEL ---
+                try {
+                    let props = Module.get_properties();
+                    debugEl.innerText = `Model Props: ${JSON.stringify(props)}`;
+                    
+                    if (props.image_input_width && props.image_input_height) {
+                        modelWidth = props.image_input_width;
+                        modelHeight = props.image_input_height;
+                    }
+                } catch (e) {
+                    debugEl.innerText = "Không đọc được props, dùng mặc định 96x96";
                 }
 
-                modelInfoEl.innerText = `Input: ${modelWidth}x${modelHeight} | Tần số: ${(props.frequency || '?')}Hz`;
+                debugEl.innerText += ` | Input: ${modelWidth}x${modelHeight}`;
                 
-                // Cài đặt canvas ẩn đúng kích thước model yêu cầu
+                // Cài đặt canvas ẩn
                 hiddenCanvas.width = modelWidth;
                 hiddenCanvas.height = modelHeight;
 
+                // Bật Camera
                 startCamera();
 
-            } catch (e) {
-                updateStatus("Lỗi khởi tạo AI: " + e.message, "err");
+            } catch (err) {
+                statusEl.innerText = "❌ Lỗi: " + err.message;
+                statusEl.className = "status-text err";
+                btnStart.style.display = 'inline-block'; // Hiện nút để thử lại
             }
         }
 
         async function startCamera() {
+            statusEl.innerText = "📷 Đang mở Camera...";
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
@@ -127,51 +131,46 @@
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     
-                    document.getElementById('cam-info').innerText = `${video.videoWidth}x${video.videoHeight}`;
-                    updateStatus("🎥 Đang chạy nhận diện...", "highlight");
-                    isReady = true;
+                    isCameraRunning = true;
+                    statusEl.innerText = "🟢 Đang hoạt động";
                     requestAnimationFrame(loop);
                 };
             } catch (err) {
-                updateStatus("Lỗi Camera: " + err.message, "err");
+                statusEl.innerText = "Lỗi Camera: " + err.message;
+                statusEl.className = "status-text err";
             }
         }
 
         async function loop() {
-            // Vẽ camera lên màn hình
+            if (!isCameraRunning) return;
+
+            // 1. Vẽ video lên màn hình
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            if (isReady && classifier) {
+            if (classifier) {
                 try {
-                    // 1. Resize ảnh về đúng kích thước Model yêu cầu
+                    // 2. Cắt ảnh nhỏ để gửi cho AI
                     hiddenCtx.drawImage(video, 0, 0, modelWidth, modelHeight);
                     
-                    // 2. Lấy dữ liệu Pixel
+                    // 3. Lấy dữ liệu pixel
                     let imageData = hiddenCtx.getImageData(0, 0, modelWidth, modelHeight);
                     let pixels = imageData.data;
                     
-                    // 3. Chuyển đổi sang định dạng Model (RGB Hex Integer)
+                    // 4. Chuyển đổi sang Hex (Yêu cầu của Edge Impulse)
                     let features = [];
                     for (let i = 0; i < pixels.length; i += 4) {
-                        // Edge Impulse thường dùng format: (R << 16) + (G << 8) + B
                         let hex = (pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2];
                         features.push(hex);
                     }
 
-                    // 4. Gửi đi phân loại
+                    // 5. Phân loại
                     let res = classifier.classify(features);
 
-                    // 5. HIỆN KẾT QUẢ THÔ (DEBUG)
+                    // 6. Vẽ kết quả
                     if (res && res.results && res.results.length > 0) {
-                        // In kết quả đầu tiên ra ô debug để bạn xem
-                        let debugText = res.results.map(r => `${r.label}: ${r.value.toFixed(2)}`).join(", ");
-                        rawResultEl.innerText = debugText;
-
-                        // 6. Vẽ lên màn hình
                         res.results.forEach(obj => {
-                            // Object Detection (FOMO)
+                            // Vẽ khung (Object Detection)
                             if (obj.x !== undefined) {
-                                // Quy đổi tọa độ
                                 let scaleX = canvas.width / modelWidth;
                                 let scaleY = canvas.height / modelHeight;
                                 
@@ -180,23 +179,21 @@
                                 let w = obj.width * scaleX;
                                 let h = obj.height * scaleY;
 
-                                ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 3;
+                                ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 4;
                                 ctx.strokeRect(x, y, w, h);
-                                ctx.fillStyle = '#00FF00'; ctx.font = '16px Arial';
-                                ctx.fillText(obj.label, x, y - 5);
+                                ctx.fillStyle = '#00FF00'; ctx.font = '20px Arial';
+                                ctx.fillText(`${obj.label} ${(obj.value*100).toFixed(0)}%`, x, y - 5);
                             } 
-                            // Classification (Phân loại ảnh)
-                            else if (obj.value > 0.4) { // Hạ ngưỡng xuống 0.4 để dễ thấy
+                            // Phân loại ảnh (Classification)
+                            else if (obj.value > 0.5) {
                                 ctx.fillStyle = "yellow"; ctx.font = "24px Arial";
-                                ctx.fillText(`${obj.label}: ${(obj.value*100).toFixed(0)}%`, 20, 40);
+                                ctx.fillText(`${obj.label}: ${(obj.value*100).toFixed(0)}%`, 20, 50);
                             }
                         });
-                    } else {
-                        rawResultEl.innerText = "Không có kết quả (Mảng rỗng)";
                     }
 
                 } catch (e) {
-                    rawResultEl.innerText = "Lỗi Loop: " + e.message;
+                    // Bỏ qua lỗi frame drop
                 }
             }
             requestAnimationFrame(loop);
