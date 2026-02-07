@@ -3,94 +3,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Camera Standard</title>
+    <title>AI Camera Project</title>
     <style>
-        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 0; }
-        #controls { padding: 20px; text-align: center; background: #222; width: 100%; }
-        button { padding: 15px 40px; font-size: 20px; background: #2196F3; color: white; border: none; border-radius: 8px; cursor: pointer; }
-        #status { margin-top: 10px; color: yellow; font-size: 18px; }
-        canvas { width: 100%; max-width: 640px; border: 2px solid #00ff00; margin-top: 10px; }
-        video { display: none; }
+        body { 
+            background-color: #000; 
+            color: #0f0; 
+            font-family: 'Courier New', Courier, monospace; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            margin: 0; 
+            min-height: 100vh;
+        }
+        
+        /* Giao diện điều khiển */
+        #controls {
+            width: 100%;
+            background: #111;
+            padding: 15px;
+            text-align: center;
+            border-bottom: 1px solid #333;
+            z-index: 100;
+        }
+
+        button {
+            padding: 12px 25px;
+            font-size: 18px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:active { transform: scale(0.95); }
+
+        /* Màn hình hiển thị */
+        #container {
+            position: relative;
+            margin-top: 10px;
+            width: 95%;
+            max-width: 640px;
+        }
+
+        canvas {
+            width: 100%;
+            height: auto;
+            border: 2px solid #00ff00;
+            background: #222;
+            display: block;
+        }
+
+        video {
+            position: absolute;
+            top: 0; left: 0;
+            width: 1px; height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Khu vực nhật ký (Log) để bạn biết lỗi gì */
+        #logs {
+            width: 90%;
+            height: 150px;
+            overflow-y: scroll;
+            background: #000;
+            border: 1px solid #444;
+            margin-top: 10px;
+            padding: 10px;
+            font-size: 12px;
+            white-space: pre-wrap;
+            color: #0f0;
+        }
     </style>
 </head>
 <body>
 
     <div id="controls">
-        <button id="btn-start" onclick="startCamera()">BẬT CAMERA</button>
-        <div id="status">Vui lòng tải bản WebAssembly (Standard)...</div>
+        <button id="btn-start" onclick="startAI()">BẬT CAMERA</button>
+        <div id="status" style="margin-top:5px; color: yellow;">Sẵn sàng...</div>
     </div>
 
-    <canvas id="output"></canvas>
-    <video id="webcam" playsinline autoplay muted></video>
+    <div id="container">
+        <canvas id="output"></canvas>
+        <video id="webcam" playsinline autoplay muted></video>
+    </div>
+
+    <div id="logs">LOG HỆ THỐNG:</div>
+
+    <script>
+        // Tạo biến giả để đánh lừa file JS
+        var module = { exports: {} };
+        var exports = module.exports;
+
+        // Hàm ghi log
+        function log(msg, isError = false) {
+            const logEl = document.getElementById('logs');
+            const color = isError ? '#ff5555' : '#00ff00';
+            logEl.innerHTML = `<div style="color:${color}">> ${msg}</div>` + logEl.innerHTML;
+        }
+    </script>
 
     <script src="edge-impulse-standalone.js"></script>
+
     <script src="run-impulse.js"></script>
 
     <script>
-        const statusEl = document.getElementById('status');
-        const btn = document.getElementById('btn-start');
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('output');
         const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        const btn = document.getElementById('btn-start');
         var classifier = null;
 
-        async function startCamera() {
+        async function startAI() {
             btn.style.display = 'none';
-            statusEl.innerText = "Đang khởi động AI...";
+            statusEl.innerText = "Đang khởi động...";
+            log("Bắt đầu quy trình...");
 
             try {
-                // 1. Khởi động Module (Bản thường chạy rất dễ)
-                if (typeof createModule === 'undefined') {
-                    throw new Error("Không tìm thấy createModule. Bạn đã tải đúng bản WebAssembly (Standard) chưa?");
-                }
+                // 1. TÌM HÀM KHỞI ĐỘNG (createModule)
+                // Do file JS xuất ra module.exports, ta phải lấy nó từ đó
+                var loader = null;
                 
-                await createModule();
+                if (typeof module.exports === 'function') {
+                    loader = module.exports;
+                    log("✅ Đã tìm thấy Loader trong module.exports");
+                } else if (typeof module.exports.createModule === 'function') {
+                    loader = module.exports.createModule;
+                    log("✅ Đã tìm thấy Loader trong module.exports.createModule");
+                } else if (typeof createModule !== 'undefined') {
+                    loader = createModule;
+                    log("✅ Đã tìm thấy createModule (Global)");
+                } else if (typeof EdgeImpulseMod !== 'undefined') {
+                    loader = EdgeImpulseMod;
+                    log("✅ Đã tìm thấy EdgeImpulseMod");
+                }
 
-                // 2. Khởi tạo Classifier
+                if (!loader) {
+                    throw new Error("Không tìm thấy hàm khởi động! Kiểm tra lại file JS.");
+                }
+
+                // 2. NẠP WASM
+                log("Đang nạp WASM...");
+                // Cấu hình đường dẫn tuyệt đối cho file WASM
+                var config = {
+                    locateFile: function(path) {
+                        // Trả về đúng tên file của bạn
+                        return "edge-impulse-standalone.wasm"; 
+                    }
+                };
+                
+                // Gọi hàm loader
+                await loader(config);
+                log("✅ WASM đã nạp thành công!");
+
+                // 3. KHỞI TẠO BỘ PHÂN LOẠI
+                log("Khởi tạo Classifier...");
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
 
-                // 3. Mở Camera
-                statusEl.innerText = "Đang mở Camera...";
+                // Lấy thông tin dự án
+                try {
+                    let project = classifier.getProjectInfo();
+                    log(`Dự án: ${project.owner} / ${project.name}`);
+                    log(`Labels: ${project.labels.join(", ")}`);
+                } catch(e) { log("Thông tin dự án ẩn."); }
+
+                // 4. BẬT CAMERA
+                log("Đang mở Camera...");
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
-                    video: { facingMode: "environment", width: 640, height: 480 }
+                    video: { 
+                        facingMode: "environment", 
+                        width: { ideal: 640 }, 
+                        height: { ideal: 480 } 
+                    }
                 });
                 
                 video.srcObject = stream;
                 
                 video.onloadedmetadata = () => {
                     video.play();
+                    // Cập nhật kích thước canvas cho khớp video
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
+                    
                     statusEl.innerText = "Đang nhận diện...";
                     statusEl.style.color = "#00ff00";
+                    log("🎥 Camera hoạt động! Bắt đầu Loop.");
+                    
                     requestAnimationFrame(loop);
                 };
 
             } catch (err) {
                 alert("Lỗi: " + err.message);
-                statusEl.innerText = "Lỗi: " + err.message;
-                statusEl.style.color = "red";
+                log("❌ LỖI: " + err.message, true);
                 btn.style.display = 'block';
             }
         }
 
         async function loop() {
+            // Vẽ video lên canvas
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
             if (classifier) {
                 try {
                     let res = classifier.classifyElements(video);
+                    
                     if (res && res.results && res.results.length > 0) {
                         res.results.forEach(obj => {
-                            // Vẽ khung (FOMO)
+                            // Vẽ khung (Object Detection)
                             if (obj.x !== undefined) {
                                 ctx.strokeStyle = '#00FF00';
                                 ctx.lineWidth = 4;
                                 ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+                                
                                 ctx.fillStyle = '#00FF00';
                                 ctx.font = '20px Arial';
-                                ctx.fillText(obj.label, obj.x, obj.y - 5);
+                                ctx.fillText(`${obj.label} ${(obj.value*100).toFixed(0)}%`, obj.x, obj.y - 10);
                             } 
                             // Phân loại (Classification)
                             else if (obj.value > 0.5) {
@@ -98,7 +229,9 @@
                             }
                         });
                     }
-                } catch (e) {}
+                } catch (e) {
+                    // Bỏ qua lỗi frame
+                }
             }
             requestAnimationFrame(loop);
         }
