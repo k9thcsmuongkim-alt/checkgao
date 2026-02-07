@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Camera Standard</title>
+    <style>
+        body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 0; }
+        #controls { padding: 20px; text-align: center; background: #222; width: 100%; }
+        button { padding: 15px 40px; font-size: 20px; background: #2196F3; color: white; border: none; border-radius: 8px; cursor: pointer; }
+        #status { margin-top: 10px; color: yellow; font-size: 18px; }
+        canvas { width: 100%; max-width: 640px; border: 2px solid #00ff00; margin-top: 10px; }
+        video { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <button id="btn-start" onclick="startCamera()">BẬT CAMERA</button>
+        <div id="status">Vui lòng tải bản WebAssembly (Standard)...</div>
+    </div>
+
+    <canvas id="output"></canvas>
+    <video id="webcam" playsinline autoplay muted></video>
+
+    <script src="edge-impulse-standalone.js"></script>
+    <script src="run-impulse.js"></script>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const btn = document.getElementById('btn-start');
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('output');
+        const ctx = canvas.getContext('2d');
+        var classifier = null;
+
+        async function startCamera() {
+            btn.style.display = 'none';
+            statusEl.innerText = "Đang khởi động AI...";
+
+            try {
+                // 1. Khởi động Module (Bản thường chạy rất dễ)
+                if (typeof createModule === 'undefined') {
+                    throw new Error("Không tìm thấy createModule. Bạn đã tải đúng bản WebAssembly (Standard) chưa?");
+                }
+                
+                await createModule();
+
+                // 2. Khởi tạo Classifier
+                classifier = new EdgeImpulseClassifier();
+                await classifier.init();
+
+                // 3. Mở Camera
+                statusEl.innerText = "Đang mở Camera...";
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: { facingMode: "environment", width: 640, height: 480 }
+                });
+                
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    video.play();
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    statusEl.innerText = "Đang nhận diện...";
+                    statusEl.style.color = "#00ff00";
+                    requestAnimationFrame(loop);
+                };
+
+            } catch (err) {
+                alert("Lỗi: " + err.message);
+                statusEl.innerText = "Lỗi: " + err.message;
+                statusEl.style.color = "red";
+                btn.style.display = 'block';
+            }
+        }
+
+        async function loop() {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            if (classifier) {
+                try {
+                    let res = classifier.classifyElements(video);
+                    if (res && res.results && res.results.length > 0) {
+                        res.results.forEach(obj => {
+                            // Vẽ khung (FOMO)
+                            if (obj.x !== undefined) {
+                                ctx.strokeStyle = '#00FF00';
+                                ctx.lineWidth = 4;
+                                ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+                                ctx.fillStyle = '#00FF00';
+                                ctx.font = '20px Arial';
+                                ctx.fillText(obj.label, obj.x, obj.y - 5);
+                            } 
+                            // Phân loại (Classification)
+                            else if (obj.value > 0.5) {
+                                statusEl.innerText = `${obj.label}: ${(obj.value*100).toFixed(0)}%`;
+                            }
+                        });
+                    }
+                } catch (e) {}
+            }
+            requestAnimationFrame(loop);
+        }
+    </script>
+</body>
+</html>
