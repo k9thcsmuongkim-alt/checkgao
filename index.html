@@ -2,46 +2,152 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Camera Fixed Final</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Scanner Pro</title>
     <style>
-        body { background: #000; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 10px; }
-        
-        #status-panel { width: 100%; max-width: 640px; background: #222; padding: 15px; border-bottom: 2px solid #555; text-align: center; }
-        .status-text { font-size: 18px; font-weight: bold; margin-bottom: 10px; display: block; }
-        .highlight { color: #00ff00; }
-        .err { color: #ff5555; }
-        
-        #container { position: relative; width: 100%; max-width: 640px; margin-top: 10px; }
-        canvas { width: 100%; height: auto; border: 2px solid #333; display: block; }
+        /* --- CẤU TRÚC GIAO DIỆN --- */
+        * { box-sizing: border-box; }
+        body { 
+            background-color: #000; 
+            margin: 0; 
+            padding: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            overflow: hidden; /* Chặn cuộn trang */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Container chính */
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+
+        /* Canvas hiển thị Camera - Căn giữa và giữ tỉ lệ */
+        canvas#output {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            z-index: 1;
+        }
+
+        /* Video gốc (Ẩn) */
         video { display: none; }
+
+        /* --- CÁC THÀNH PHẦN UI (GIAO DIỆN) --- */
         
-        /* Nút bắt buộc (chỉ hiện khi cần) */
-        #btn-start { display: none; padding: 15px 30px; font-size: 18px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+        /* Màn hình chờ (Loading) */
+        #loading-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s;
+        }
+
+        /* Vòng xoay Loading */
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #00D44A; /* Màu xanh Edge Impulse */
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .loading-text {
+            color: #fff;
+            font-size: 16px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        /* Thanh trạng thái (Status Bar) - Trông giống App */
+        #status-pill {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            padding: 8px 20px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 14px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
         
-        /* Debug info */
-        #debug-info { font-size: 12px; color: #aaa; margin-top: 5px; }
+        .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background-color: #ffaa00; /* Vàng = Đang tải */
+        }
+        .dot.active { background-color: #00D44A; box-shadow: 0 0 8px #00D44A; } /* Xanh = OK */
+        .dot.error { background-color: #ff3333; }
+
+        /* Nút Bắt đầu (Chỉ hiện khi cần) */
+        #btn-start {
+            display: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #00D44A, #00a83b);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 212, 74, 0.4);
+            transition: transform 0.2s;
+        }
+        #btn-start:active { transform: scale(0.95); }
+
     </style>
 </head>
 <body>
 
-    <div id="status-panel">
-        <span id="status-text" class="status-text">Đang khởi tạo hệ thống...</span>
-        <div id="debug-info">Chờ thư viện tải...</div>
-        <button id="btn-start" onclick="initAI()">BẤM ĐỂ BẮT ĐẦU</button>
-    </div>
-    
-    <div id="container">
+    <div id="app-container">
+        <div id="loading-screen">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loader-text">KHỞI ĐỘNG AI...</div>
+            <button id="btn-start" onclick="initAI()">BẮT ĐẦU QUÉT</button>
+            <div id="error-msg" style="color: #ff5555; margin-top: 10px; font-size: 13px; max-width: 80%; text-align: center;"></div>
+        </div>
+
+        <div id="status-pill">
+            <div class="dot" id="status-dot"></div>
+            <span id="status-text">Đang tải thư viện...</span>
+        </div>
+
         <canvas id="output"></canvas>
+        
+        <canvas id="hidden-canvas" style="display:none;"></canvas>
+        <video id="webcam" playsinline autoplay muted></video>
     </div>
-    
-    <canvas id="hidden-canvas" style="display:none;"></canvas>
-    <video id="webcam" playsinline autoplay muted></video>
 
     <script>
         var Module = {
             locateFile: function(path) {
-                // Chỉ đường cho file WASM
                 return "edge-impulse-standalone.wasm";
             }
         };
@@ -51,9 +157,14 @@
     <script src="run-impulse.js"></script>
 
     <script>
-        const statusEl = document.getElementById('status-text');
-        const debugEl = document.getElementById('debug-info');
+        // DOM Elements
+        const loadingScreen = document.getElementById('loading-screen');
+        const loaderText = document.getElementById('loader-text');
+        const spinner = document.querySelector('.spinner');
         const btnStart = document.getElementById('btn-start');
+        const statusText = document.getElementById('status-text');
+        const statusDot = document.getElementById('status-dot');
+        const errorMsg = document.getElementById('error-msg');
         
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('output');
@@ -66,79 +177,88 @@
         var modelHeight = 96;
         var isCameraRunning = false;
 
-        // Tự động chạy khi trang tải xong
+        // Tự động chạy
         window.onload = function() {
-            // Đợi 1 chút để đảm bảo file JS đã nạp
-            setTimeout(initAI, 1000);
+            setTimeout(initAI, 500);
         };
 
         async function initAI() {
+            // Ẩn nút start nếu đang chạy lại
             btnStart.style.display = 'none';
-            statusEl.innerText = "⏳ Đang nạp Model AI...";
+            spinner.style.display = 'block';
+            loaderText.innerText = "NẠP MODEL AI...";
             
             try {
                 if (typeof EdgeImpulseClassifier === 'undefined') {
-                    throw new Error("Chưa tải được file run-impulse.js");
+                    throw new Error("Chưa tải xong run-impulse.js");
                 }
 
-                // Khởi tạo Classifier (Đây là bước quan trọng nhất)
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
                 
-                statusEl.innerText = "✅ AI Đã Tải Xong! Đang đọc thông số...";
-                statusEl.className = "status-text highlight";
-
-                // --- TỰ ĐỘNG ĐỌC KÍCH THƯỚC MODEL ---
+                // Đọc thông số Model
                 try {
                     let props = Module.get_properties();
-                    debugEl.innerText = `Model Props: ${JSON.stringify(props)}`;
-                    
                     if (props.image_input_width && props.image_input_height) {
                         modelWidth = props.image_input_width;
                         modelHeight = props.image_input_height;
                     }
-                } catch (e) {
-                    debugEl.innerText = "Không đọc được props, dùng mặc định 96x96";
-                }
-
-                debugEl.innerText += ` | Input: ${modelWidth}x${modelHeight}`;
+                } catch (e) {}
                 
-                // Cài đặt canvas ẩn
                 hiddenCanvas.width = modelWidth;
                 hiddenCanvas.height = modelHeight;
 
-                // Bật Camera
+                loaderText.innerText = "ĐANG MỞ CAMERA...";
                 startCamera();
 
             } catch (err) {
-                statusEl.innerText = "❌ Lỗi: " + err.message;
-                statusEl.className = "status-text err";
-                btnStart.style.display = 'inline-block'; // Hiện nút để thử lại
+                showError("Lỗi khởi tạo: " + err.message);
             }
         }
 
         async function startCamera() {
-            statusEl.innerText = "📷 Đang mở Camera...";
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
-                    video: { facingMode: "environment", width: 640, height: 480 }
+                    video: { 
+                        facingMode: "environment",
+                        width: { ideal: 1280 }, // Cố gắng lấy nét cao hơn
+                        height: { ideal: 720 } 
+                    }
                 });
                 
                 video.srcObject = stream;
                 video.onloadedmetadata = () => {
                     video.play();
+                    
+                    // Cập nhật kích thước canvas khớp video
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     
                     isCameraRunning = true;
-                    statusEl.innerText = "🟢 Đang hoạt động";
+                    
+                    // Ẩn màn hình chờ với hiệu ứng mờ dần
+                    loadingScreen.style.opacity = '0';
+                    setTimeout(() => { loadingScreen.style.display = 'none'; }, 500);
+
+                    // Cập nhật trạng thái
+                    statusDot.className = "dot active";
+                    statusText.innerText = "Đang quét...";
+                    
                     requestAnimationFrame(loop);
                 };
             } catch (err) {
-                statusEl.innerText = "Lỗi Camera: " + err.message;
-                statusEl.className = "status-text err";
+                showError("Không thể mở Camera. Hãy cấp quyền!");
             }
+        }
+
+        function showError(msg) {
+            spinner.style.display = 'none';
+            loaderText.style.display = 'none';
+            btnStart.style.display = 'inline-block'; // Hiện nút thử lại
+            errorMsg.innerText = msg;
+            statusDot.className = "dot error";
+            statusText.innerText = "Lỗi hệ thống";
         }
 
         async function loop() {
@@ -149,27 +269,23 @@
 
             if (classifier) {
                 try {
-                    // 2. Cắt ảnh nhỏ để gửi cho AI
+                    // 2. Xử lý ảnh
                     hiddenCtx.drawImage(video, 0, 0, modelWidth, modelHeight);
-                    
-                    // 3. Lấy dữ liệu pixel
                     let imageData = hiddenCtx.getImageData(0, 0, modelWidth, modelHeight);
                     let pixels = imageData.data;
                     
-                    // 4. Chuyển đổi sang Hex (Yêu cầu của Edge Impulse)
                     let features = [];
                     for (let i = 0; i < pixels.length; i += 4) {
                         let hex = (pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2];
                         features.push(hex);
                     }
 
-                    // 5. Phân loại
                     let res = classifier.classify(features);
 
-                    // 6. Vẽ kết quả
+                    // 3. Vẽ Kết quả (Giao diện đẹp)
                     if (res && res.results && res.results.length > 0) {
                         res.results.forEach(obj => {
-                            // Vẽ khung (Object Detection)
+                            // Object Detection (FOMO)
                             if (obj.x !== undefined) {
                                 let scaleX = canvas.width / modelWidth;
                                 let scaleY = canvas.height / modelHeight;
@@ -179,22 +295,34 @@
                                 let w = obj.width * scaleX;
                                 let h = obj.height * scaleY;
 
-                                ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 4;
+                                // Vẽ khung Neon
+                                ctx.shadowColor = "#00D44A";
+                                ctx.shadowBlur = 15;
+                                ctx.strokeStyle = '#00D44A'; 
+                                ctx.lineWidth = 4;
                                 ctx.strokeRect(x, y, w, h);
-                                ctx.fillStyle = '#00FF00'; ctx.font = '20px Arial';
-                                ctx.fillText(`${obj.label} ${(obj.value*100).toFixed(0)}%`, x, y - 5);
+                                ctx.shadowBlur = 0; // Reset shadow
+
+                                // Vẽ nền nhãn
+                                ctx.fillStyle = 'rgba(0, 212, 74, 0.8)';
+                                let text = obj.label + " " + (obj.value*100).toFixed(0) + "%";
+                                let textWidth = ctx.measureText(text).width;
+                                ctx.fillRect(x, y - 25, textWidth + 10, 25);
+
+                                // Vẽ chữ trắng
+                                ctx.fillStyle = '#ffffff';
+                                ctx.font = 'bold 16px sans-serif';
+                                ctx.fillText(text, x + 5, y - 7);
                             } 
-                            // Phân loại ảnh (Classification)
+                            // Classification (Phân loại ảnh)
                             else if (obj.value > 0.5) {
-                                ctx.fillStyle = "yellow"; ctx.font = "24px Arial";
-                                ctx.fillText(`${obj.label}: ${(obj.value*100).toFixed(0)}%`, 20, 50);
+                                statusText.innerText = `${obj.label} (${(obj.value*100).toFixed(0)}%)`;
+                                statusDot.className = "dot active";
                             }
                         });
                     }
 
-                } catch (e) {
-                    // Bỏ qua lỗi frame drop
-                }
+                } catch (e) {}
             }
             requestAnimationFrame(loop);
         }
