@@ -3,237 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Camera Project</title>
+    <title>AI Camera Scanner</title>
     <style>
-        body { 
-            background-color: #000; 
-            color: #0f0; 
-            font-family: 'Courier New', Courier, monospace; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            margin: 0; 
-            min-height: 100vh;
-        }
-        
-        /* Giao diện điều khiển */
-        #controls {
-            width: 100%;
-            background: #111;
-            padding: 15px;
-            text-align: center;
-            border-bottom: 1px solid #333;
-            z-index: 100;
-        }
-
-        button {
-            padding: 12px 25px;
-            font-size: 18px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        button:active { transform: scale(0.95); }
-
-        /* Màn hình hiển thị */
-        #container {
-            position: relative;
-            margin-top: 10px;
-            width: 95%;
-            max-width: 640px;
-        }
-
-        canvas {
-            width: 100%;
-            height: auto;
-            border: 2px solid #00ff00;
-            background: #222;
-            display: block;
-        }
-
-        video {
-            position: absolute;
-            top: 0; left: 0;
-            width: 1px; height: 1px;
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        /* Khu vực nhật ký (Log) để bạn biết lỗi gì */
-        #logs {
-            width: 90%;
-            height: 150px;
-            overflow-y: scroll;
-            background: #000;
-            border: 1px solid #444;
-            margin-top: 10px;
-            padding: 10px;
-            font-size: 12px;
-            white-space: pre-wrap;
-            color: #0f0;
-        }
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #333; padding: 10px; height: 300px; overflow-y: scroll; background: #111; white-space: pre-wrap; margin-bottom: 20px; }
+        button { padding: 15px; font-size: 18px; background: #007bff; color: white; border: none; cursor: pointer; }
     </style>
+    
+    <script>
+        window.oldVars = Object.keys(window);
+    </script>
 </head>
 <body>
 
-    <div id="controls">
-        <button id="btn-start" onclick="startAI()">BẬT CAMERA</button>
-        <div id="status" style="margin-top:5px; color: yellow;">Sẵn sàng...</div>
-    </div>
-
-    <div id="container">
-        <canvas id="output"></canvas>
-        <video id="webcam" playsinline autoplay muted></video>
-    </div>
-
-    <div id="logs">LOG HỆ THỐNG:</div>
+    <h2>MÁY QUÉT TÊN HÀM (SCANNER)</h2>
+    <div id="log">Đang đợi tải file JS...</div>
+    <button onclick="checkVars()">BẤM ĐỂ QUÉT TÌM BIẾN MỚI</button>
 
     <script>
-        // Tạo biến giả để đánh lừa file JS
-        var module = { exports: {} };
+        var module = { exports: {} }; 
         var exports = module.exports;
-
-        // Hàm ghi log
-        function log(msg, isError = false) {
-            const logEl = document.getElementById('logs');
-            const color = isError ? '#ff5555' : '#00ff00';
-            logEl.innerHTML = `<div style="color:${color}">> ${msg}</div>` + logEl.innerHTML;
-        }
     </script>
 
     <script src="edge-impulse-standalone.js"></script>
 
-    <script src="run-impulse.js"></script>
-
     <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('output');
-        const ctx = canvas.getContext('2d');
-        const statusEl = document.getElementById('status');
-        const btn = document.getElementById('btn-start');
-        var classifier = null;
+        const logEl = document.getElementById('log');
+        function log(msg) { logEl.innerHTML += `> ${msg}\n`; }
 
-        async function startAI() {
-            btn.style.display = 'none';
-            statusEl.innerText = "Đang khởi động...";
-            log("Bắt đầu quy trình...");
+        function checkVars() {
+            log("--- BẮT ĐẦU QUÉT ---");
+            
+            // 1. Kiểm tra module.exports
+            if (typeof module.exports === 'function') {
+                log("✅ PHÁT HIỆN: module.exports là một hàm!");
+                console.log(module.exports);
+                alert("Tìm thấy! Hãy báo cho tôi: 'Nó nằm trong module.exports'");
+                return;
+            } else if (Object.keys(module.exports).length > 0) {
+                log("✅ PHÁT HIỆN: module.exports chứa các hàm sau: " + Object.keys(module.exports).join(", "));
+                return;
+            }
 
-            try {
-                // 1. TÌM HÀM KHỞI ĐỘNG (createModule)
-                // Do file JS xuất ra module.exports, ta phải lấy nó từ đó
-                var loader = null;
-                
-                if (typeof module.exports === 'function') {
-                    loader = module.exports;
-                    log("✅ Đã tìm thấy Loader trong module.exports");
-                } else if (typeof module.exports.createModule === 'function') {
-                    loader = module.exports.createModule;
-                    log("✅ Đã tìm thấy Loader trong module.exports.createModule");
-                } else if (typeof createModule !== 'undefined') {
-                    loader = createModule;
-                    log("✅ Đã tìm thấy createModule (Global)");
-                } else if (typeof EdgeImpulseMod !== 'undefined') {
-                    loader = EdgeImpulseMod;
-                    log("✅ Đã tìm thấy EdgeImpulseMod");
-                }
+            // 2. Kiểm tra biến toàn cục (Window)
+            const currentVars = Object.keys(window);
+            const newVars = currentVars.filter(key => !window.oldVars.includes(key));
+            
+            // Lọc bỏ các biến rác hệ thống
+            const realNewVars = newVars.filter(v => v !== 'module' && v !== 'exports' && v !== 'oldVars' && v !== 'log' && v !== 'checkVars' && v !== 'logEl');
 
-                if (!loader) {
-                    throw new Error("Không tìm thấy hàm khởi động! Kiểm tra lại file JS.");
-                }
-
-                // 2. NẠP WASM
-                log("Đang nạp WASM...");
-                // Cấu hình đường dẫn tuyệt đối cho file WASM
-                var config = {
-                    locateFile: function(path) {
-                        // Trả về đúng tên file của bạn
-                        return "edge-impulse-standalone.wasm"; 
-                    }
-                };
-                
-                // Gọi hàm loader
-                await loader(config);
-                log("✅ WASM đã nạp thành công!");
-
-                // 3. KHỞI TẠO BỘ PHÂN LOẠI
-                log("Khởi tạo Classifier...");
-                classifier = new EdgeImpulseClassifier();
-                await classifier.init();
-
-                // Lấy thông tin dự án
-                try {
-                    let project = classifier.getProjectInfo();
-                    log(`Dự án: ${project.owner} / ${project.name}`);
-                    log(`Labels: ${project.labels.join(", ")}`);
-                } catch(e) { log("Thông tin dự án ẩn."); }
-
-                // 4. BẬT CAMERA
-                log("Đang mở Camera...");
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: { 
-                        facingMode: "environment", 
-                        width: { ideal: 640 }, 
-                        height: { ideal: 480 } 
-                    }
+            if (realNewVars.length > 0) {
+                log("✅ PHÁT HIỆN CÁC BIẾN MỚI TRÊN WINDOW:");
+                realNewVars.forEach(v => {
+                    log(`   - ${v} (Loại: ${typeof window[v]})`);
                 });
-                
-                video.srcObject = stream;
-                
-                video.onloadedmetadata = () => {
-                    video.play();
-                    // Cập nhật kích thước canvas cho khớp video
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    
-                    statusEl.innerText = "Đang nhận diện...";
-                    statusEl.style.color = "#00ff00";
-                    log("🎥 Camera hoạt động! Bắt đầu Loop.");
-                    
-                    requestAnimationFrame(loop);
-                };
-
-            } catch (err) {
-                alert("Lỗi: " + err.message);
-                log("❌ LỖI: " + err.message, true);
-                btn.style.display = 'block';
+                log("👉 Hãy copy tên các biến trên gửi cho tôi!");
+            } else {
+                log("❌ KHÔNG TÌM THẤY GÌ CẢ.");
+                log("⚠️ Nguyên nhân: File JS có thể bị lỗi cú pháp hoặc chưa tải xong.");
+                log("👉 Hãy bấm F12, chọn tab Console và chụp ảnh lỗi màu đỏ gửi cho tôi.");
             }
-        }
-
-        async function loop() {
-            // Vẽ video lên canvas
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            if (classifier) {
-                try {
-                    let res = classifier.classifyElements(video);
-                    
-                    if (res && res.results && res.results.length > 0) {
-                        res.results.forEach(obj => {
-                            // Vẽ khung (Object Detection)
-                            if (obj.x !== undefined) {
-                                ctx.strokeStyle = '#00FF00';
-                                ctx.lineWidth = 4;
-                                ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
-                                
-                                ctx.fillStyle = '#00FF00';
-                                ctx.font = '20px Arial';
-                                ctx.fillText(`${obj.label} ${(obj.value*100).toFixed(0)}%`, obj.x, obj.y - 10);
-                            } 
-                            // Phân loại (Classification)
-                            else if (obj.value > 0.5) {
-                                statusEl.innerText = `${obj.label}: ${(obj.value*100).toFixed(0)}%`;
-                            }
-                        });
-                    }
-                } catch (e) {
-                    // Bỏ qua lỗi frame
-                }
-            }
-            requestAnimationFrame(loop);
         }
     </script>
 </body>
